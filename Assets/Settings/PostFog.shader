@@ -58,63 +58,12 @@ Shader "MC/PostEffect/PostFog"
             return saturate(fog);
         }
 
-        // struct Attributes
-        // {
-        //     float4 positionOS : POSITION;
-        //     float2 uv : TEXCOORD0;
-        // };
-
-        struct v2f
-        {
-            float4 pos : SV_POSITION;
-            float3 uv : TEXCOORD0;
-            float4 interpolatedRay : TEXCOORD1;
-        };
-
-        //     Varyings Vert(Attributes input)
-        //     {
-        //         Varyings output;
-        //         UNITY_SETUP_INSTANCE_ID(input);
-        //         UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
-        //
-        //         #if SHADER_API_GLES
-        // float4 pos = input.positionOS;
-        // float2 uv  = input.uv;
-        //         #else
-        //         float4 pos = GetFullScreenTriangleVertexPosition(input.vertexID);
-        //         float2 uv = GetFullScreenTriangleTexCoord(input.vertexID);
-        //         #endif
-        //
-        //         output.positionCS = pos;
-        //         output.texcoord = uv * _BlitScaleBias.xy + _BlitScaleBias.zw;
-        //         return output;
-        //     }
-
-        Varyings Vert2(Attributes input)
-        {
-            Varyings output;
-            UNITY_SETUP_INSTANCE_ID(input);
-            UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
-
-            #if SHADER_API_GLES
-    float4 pos = input.positionOS;
-    float2 uv  = input.uv;
-            #else
-            float4 pos = GetFullScreenTriangleVertexPosition(input.vertexID);
-            float2 uv = GetFullScreenTriangleTexCoord(input.vertexID);
-            #endif
-
-            output.positionCS = pos;
-            output.texcoord = uv * _BlitScaleBias.xy + _BlitScaleBias.zw;
-            return output;
-        }
-
-        half4 Fragment(v2f input) : SV_Target
+        half4 Fragment(Varyings input) : SV_Target
         {
             // 要计算用于采样深度缓冲区的 UV 坐标，
             // 请将像素位置除以渲染目标分辨率
             // _ScaledScreenParams。
-            float2 UV = input.pos.xy / _ScaledScreenParams.xy;
+            float2 UV = input.positionCS.xy / _ScaledScreenParams.xy;
 
             // 从摄像机深度纹理中采样深度。
             #if UNITY_REVERSED_Z
@@ -127,22 +76,22 @@ Shader "MC/PostEffect/PostFog"
             // 重建世界空间位置。
             float3 positionWS = ComputeWorldSpacePosition(UV, depth, UNITY_MATRIX_I_VP);
 
-            float cameraDist = distance(_WorldSpaceCameraPos,positionWS);
-            
-            float dist = cameraDist - _ProjectionParams.y;//减去近截面
+            float cameraDist = distance(_WorldSpaceCameraPos, positionWS);
+
+            float dist = cameraDist - _ProjectionParams.y; //减去近截面
             half distFog = 1 - ComputeFog(dist);
 
             half2 speed = _Time.y * float2(_FogXSpeed, _FogYSpeed);
-            half noise = (SAMPLE_TEXTURE2D_X(_PostFog_NoiseTex, sampler_PostFog_NoiseTex, input.uv.xy + speed).r - 0.5) * _NoiseAmount;
+            half noise = (SAMPLE_TEXTURE2D_X(_PostFog_NoiseTex, sampler_PostFog_NoiseTex, input.texcoord.xy + speed).r - 0.5) * _NoiseAmount;
 
             float heightFog = (_FogEnd - positionWS.y) / (_FogEnd - _FogStart);
             float t = heightFog;
             heightFog = heightFog / 2;
             heightFog = saturate(heightFog * _FogDensity * (1 + noise));
-            
+
             half fog = max(distFog, heightFog);
-// fog = distFog;
-// fog = heightFog;
+            // fog = distFog;
+            fog = heightFog;
             // 天空盒---开始，使用_SkyDensity乘以fog
             #if UNITY_REVERSED_Z
             // 具有 REVERSED_Z 的平台（如 D3D）的情况。
@@ -151,11 +100,11 @@ Shader "MC/PostEffect/PostFog"
                     fog *= lerp(1, _SkyDensity, depth > 0.9999);
             #endif
             // 天空盒---结束
-            
+
             half4 finalColor = lerp(_PostFog_StartColor, _PostFog_EndColor, t);
             finalColor.a = fog;
 
-            half4 sourceColor = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, input.uv.xy);
+            half4 sourceColor = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, input.texcoord.xy);
 
             return finalColor * finalColor.a + (1 - finalColor.a) * sourceColor;
         }
