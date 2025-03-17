@@ -136,6 +136,13 @@ namespace UnityEngine.Rendering.Universal
             /// </summary>
             [Reload("Shaders/PostProcessing/FinalPost.shader")]
             public Shader finalPostPassPS;
+            
+            #region CustomPostEffect
+
+            [Reload("MC/PostEffect/PostFog", ReloadAttribute.Package.Builtin)]
+            public Shader postFogPS;
+
+            #endregion
         }
 
         /// <summary>

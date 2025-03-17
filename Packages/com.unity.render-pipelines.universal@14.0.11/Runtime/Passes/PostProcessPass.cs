@@ -68,6 +68,11 @@ namespace UnityEngine.Rendering.Universal
         ColorAdjustments m_ColorAdjustments;
         Tonemapping m_Tonemapping;
         FilmGrain m_FilmGrain;
+        #region CustomPostEffect
+
+        PostFog m_PostFog;
+
+        #endregion
 
         // Misc
         const int k_MaxPyramidSize = 16;
@@ -313,6 +318,9 @@ namespace UnityEngine.Rendering.Universal
             m_FilmGrain = stack.GetComponent<FilmGrain>();
             m_UseFastSRGBLinearConversion = renderingData.postProcessingData.useFastSRGBLinearConversion;
             m_SupportDataDrivenLensFlare = renderingData.postProcessingData.supportDataDrivenLensFlare;
+        #region CustomPostEffect
+            m_PostFog = stack.GetComponent<PostFog>();
+        #endregion
 
             var cmd = renderingData.commandBuffer;
             if (m_IsFinalPass)
@@ -465,6 +473,17 @@ namespace UnityEngine.Rendering.Universal
                 }
             }
 
+            #region CustomPostEffectFog
+
+            if (m_PostFog.IsActive() && !isSceneViewCamera){
+                using (new ProfilingScope(cmd, ProfilingSampler.Get(URPProfileId.PostFog))){
+                    DoPostFog(cameraData.camera, cmd, GetSource(), GetDestination());
+                    Swap(ref renderer);
+                }
+            }
+
+            #endregion
+            
             // Depth of Field
             // Adreno 3xx SystemInfo.graphicsShaderLevel is 35, but instancing support is disabled due to buggy drivers.
             // DOF shader uses #pragma target 3.5 which adds requirement for instancing support, thus marking the shader unsupported on those devices.
@@ -1573,6 +1592,54 @@ namespace UnityEngine.Rendering.Universal
         }
 
 #endregion
+#region CustomPostEffect
+
+        #region PostFog
+
+        void DoPostFog(Camera cam, CommandBuffer cmd, RTHandle source, RTHandle destination){
+            var mat = m_Materials.postFog;
+            var camTran = cam.transform;
+            
+            if (ShaderConstants._PostFog_viewfrustumCorners == null){
+                ShaderConstants._PostFog_viewfrustumCorners = new Vector3[4];
+            }
+            
+            cam.CalculateFrustumCorners(new Rect(0, 0, 1, 1), cam.farClipPlane,
+                Camera.MonoOrStereoscopicEye.Mono, ShaderConstants._PostFog_viewfrustumCorners);
+            
+            ShaderConstants._PostFog_frustumMatrix.SetRow(0,
+                camTran.TransformVector(ShaderConstants._PostFog_viewfrustumCorners[0]));
+            ShaderConstants._PostFog_frustumMatrix.SetRow(1,
+                camTran.TransformVector(ShaderConstants._PostFog_viewfrustumCorners[1]));
+            ShaderConstants._PostFog_frustumMatrix.SetRow(2,
+                camTran.TransformVector(ShaderConstants._PostFog_viewfrustumCorners[2]));
+            ShaderConstants._PostFog_frustumMatrix.SetRow(3,
+                camTran.TransformVector(ShaderConstants._PostFog_viewfrustumCorners[3]));
+            
+
+            mat.SetMatrix(ShaderConstants._PostFog_FrustumsRay, ShaderConstants._PostFog_frustumMatrix);
+
+            mat.SetColor(ShaderConstants._PostFog_StartColor, m_PostFog.fogStartColor.value);
+            mat.SetColor(ShaderConstants._PostFog_EndColor, m_PostFog.fogEndColor.value);
+            mat.SetVector(ShaderConstants._PostFog_Ranges,
+                new Vector4(m_PostFog.fogStart.value, m_PostFog.fogEnd.value, m_PostFog.fogDensity.value, 0));
+            mat.SetVector(ShaderConstants._PostFog_Params,
+                new Vector4(m_PostFog.fogXSpeed.value, m_PostFog.fogYSpeed.value, m_PostFog.noiseAmount.value,
+                    m_PostFog.skyDesity.value));
+            mat.SetTexture(ShaderConstants._PostFog_NoiseTex, m_PostFog.noiseTexture.value);
+            Matrix4x4 viewMatrix = cam.worldToCameraMatrix;
+            Vector2 worldSpaceUpDirToScreen = new Vector2(viewMatrix.m01, viewMatrix.m11);
+            worldSpaceUpDirToScreen.Normalize();
+            mat.SetVector(ShaderConstants._WorldSpaceUpDirToScreen, worldSpaceUpDirToScreen);
+
+            PostProcessUtils.SetSourceSize(cmd, m_Descriptor);
+
+            Blitter.BlitCameraTexture(cmd, source, destination, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store, mat,0);
+        }
+
+        #endregion
+
+        #endregion
 
 #region Internal utilities
 
@@ -1591,6 +1658,11 @@ namespace UnityEngine.Rendering.Universal
             public readonly Material uber;
             public readonly Material finalPass;
             public readonly Material lensFlareDataDriven;
+            #region CustomPostEffect
+
+            public readonly Material postFog;
+
+            #endregion
 
             public MaterialLibrary(PostProcessData data)
             {
@@ -1611,6 +1683,11 @@ namespace UnityEngine.Rendering.Universal
                 uber = Load(data.shaders.uberPostPS);
                 finalPass = Load(data.shaders.finalPostPassPS);
                 lensFlareDataDriven = Load(data.shaders.LensFlareDataDrivenPS);
+                #region CustomPostEffect
+
+                postFog = Load(data.shaders.postFogPS);
+
+                #endregion
             }
 
             Material Load(Shader shader)
@@ -1643,6 +1720,7 @@ namespace UnityEngine.Rendering.Universal
                 CoreUtils.Destroy(uber);
                 CoreUtils.Destroy(finalPass);
                 CoreUtils.Destroy(lensFlareDataDriven);
+                CoreUtils.Destroy(postFog);
             }
         }
 
@@ -1707,6 +1785,20 @@ namespace UnityEngine.Rendering.Universal
 
             public static int[] _BloomMipUp;
             public static int[] _BloomMipDown;
+            #region CustomPostEffect
+
+            public static readonly int _PostFog_StartColor = Shader.PropertyToID("_PostFog_StartColor");
+            public static readonly int _PostFog_EndColor = Shader.PropertyToID("_PostFog_EndColor");
+            public static readonly int _PostFog_Params = Shader.PropertyToID("_PostFog_Params");
+            public static readonly int _PostFog_Ranges = Shader.PropertyToID("_PostFog_Ranges");
+            public static readonly int _PostFog_NoiseTex = Shader.PropertyToID("_PostFog_NoiseTex");
+            public static readonly int _PostFog_FrustumsRay = Shader.PropertyToID("_PostFog_FrustumsRay");
+            public static readonly int _WorldSpaceUpDirToScreen = Shader.PropertyToID("_WorldSpaceUpDirToScreen");
+
+            public static Vector3[] _PostFog_viewfrustumCorners;
+            public static Matrix4x4 _PostFog_frustumMatrix = new Matrix4x4();
+
+            #endregion
         }
 
 #endregion

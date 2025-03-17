@@ -1793,7 +1793,10 @@ namespace UnityEngine.Rendering.Universal
         MotionVectors,
         DrawFullscreen,
 
-        FinalBlit
+        FinalBlit,
+    #region CustomPostEffect
+        PostFog
+    #endregion
     }
 
     // Internal class to detect and cache runtime platform information.
