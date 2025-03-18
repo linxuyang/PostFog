@@ -91,7 +91,7 @@ Shader "MC/PostEffect/PostFog"
 
             half fog = max(distFog, heightFog);
             // fog = distFog;
-            fog = heightFog;
+            // fog = heightFog;
             // 天空盒---开始，使用_SkyDensity乘以fog
             #if UNITY_REVERSED_Z
             // 具有 REVERSED_Z 的平台（如 D3D）的情况。
